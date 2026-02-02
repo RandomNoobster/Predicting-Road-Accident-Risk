@@ -1,43 +1,78 @@
 import pandas as pd
 import numpy as np
-from sklearn.metrics import confusion_matrix
+from matplotlib import pyplot as plt
+import os
 
-# From "Methods and Tools":
-# We wrap data loading to ensure consistency across the team's experiments.
+
 def load_data(path):
+    """
+    Standardizes data loading across the project.
+    Ref: 'Methods and Tools' - Reproducibility.
+    """
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Data file not found at: {path}")
     return pd.read_csv(path)
 
-# From "Anomaly Detection" (Slide: A Simple Cost Model):
-# We evaluate the model based on business value, not just accuracy.
-# This implements the logic: cost = c_alrm * FP + c_missed * FN
-def calculate_cost(y_true, y_pred_prob, threshold, c_fp, c_fn):
-    """
-    Calculates business cost based on the Anomaly Detection lecture logic.
-    c_fp: Cost of False Positive (False Alarm / Wasted Intervention)
-    c_fn: Cost of False Negative (Missed Accident)
-    """
-    # Convert probabilities to binary decisions based on the threshold
-    preds = (y_pred_prob >= threshold).astype(int)
-    
-    # Extract confusion matrix components
-    tn, fp, fn, tp = confusion_matrix(y_true, preds).ravel()
-    
-    # Compute total cost (we assume TN and TP have 0 cost for this specific model)
-    total_cost = (fp * c_fp) + (fn * c_fn)
-    return total_cost
 
-# From "Anomaly Detection" (Slide: Threshold Optimization):
-# We use a simple line search to find the optimal operating point (epsilon/theta).
-def opt_threshold(y_true, y_pred_prob, c_fp, c_fn):
+def plot_pred_scatter(y_true, y_pred, figsize=(10, 6), title='Prediction Accuracy'):
     """
-    Line search for threshold optimization.
+    Scatter plot for regression evaluation.
+    Ref: 'RUL Prediction as Regression' (Slide: Baseline Evaluation).
+    
+    Visualizes how well predictions match ground truth.
+    The red dashed line represents perfect prediction (y = x).
     """
-    # Define a range of "sampled" thresholds (as seen in the lecture)
-    thresholds = np.linspace(0, 1, 101)
+    plt.figure(figsize=figsize)
+    plt.scatter(y_true, y_pred, alpha=0.3, s=10)
     
-    # Evaluate cost for each threshold
-    costs = [calculate_cost(y_true, y_pred_prob, t, c_fp, c_fn) for t in thresholds]
+    # Plot diagonal line for reference
+    min_val = min(y_true.min(), y_pred.min())
+    max_val = max(y_true.max(), y_pred.max())
+    plt.plot([min_val, max_val], [min_val, max_val], 'r--', label='Perfect Prediction')
     
-    # Pick the best one (argmin)
-    best_idx = np.argmin(costs)
-    return thresholds[best_idx], costs[best_idx]
+    plt.xlabel('True Risk')
+    plt.ylabel('Predicted Risk')
+    plt.legend()
+    plt.grid(True, alpha=0.5)
+    plt.title(title)
+    plt.show()
+
+def plot_importance(importance_series, title='Feature Importance', top_n=20, figsize=(10, 8)):
+    """
+    Bar chart for feature importance.
+    Ref: 'Non-Linear Models' (Slide: Important Attributes).
+    
+    Handles sorting and limiting the number of features displayed 
+    to focus on the most relevant correlates.
+    """
+    plt.figure(figsize=figsize)
+    # Plot top N features sorted by absolute value (if signed) or magnitude
+    importance_series.abs().sort_values(ascending=True).tail(top_n).plot(kind='barh')
+    
+    plt.xlabel('Importance Score')
+    plt.ylabel('Feature')
+    plt.title(title)
+    plt.grid(True, axis='x', alpha=0.5)
+    plt.show()
+
+
+def asymmetric_risk_loss(y_true, y_pred, penalty_underestimate=5.0):
+    """
+    Custom 'Industrial' metric.
+    Ref: 'RUL Prediction' (Slide: Cost Model).
+    
+    In safety-critical applications (like road accidents or equipment failure),
+    underestimating risk is often much more costly than overestimating it.
+    
+    Args:
+        penalty_underestimate: Multiplier for errors where Pred < True.
+    """
+    diff = y_pred - y_true
+    
+    # Logic: 
+    # If diff < 0 (Underestimate), cost = |diff| * penalty
+    # If diff > 0 (Overestimate), cost = |diff| * 1
+    weights = np.where(diff < 0, penalty_underestimate, 1.0)
+    
+    weighted_mae = np.mean(np.abs(diff) * weights)
+    return weighted_mae
