@@ -4,6 +4,8 @@ import joblib
 # DUPLICATE from main notebook
 from util.data import load_data, clean_data, split_data, train_val_test_split, summarize_columns, normalize
 from util.visualizations import plot_frequencies
+from sklearn.preprocessing import MinMaxScaler, StandardScaler
+
 
 # DUPLICATE from main notebook
 def prepare_data():
@@ -17,47 +19,24 @@ def prepare_data():
     X, Y = split_data(data_cleaned, TARGET_COL)
     X_train, X_val, X_test, Y_train, Y_val, Y_test = train_val_test_split(X, Y)
 
-    X_train, X_val, X_test = normalize(X_train, X_val, X_test, ["speed_limit"])
+    features_to_normalize = ["speed_limit", "num_lanes"]
+    features_to_standardize = ["num_reported_accidents"]
+
+    X_train, X_val, X_test = normalize(X_train, X_val, X_test, features_to_normalize, MinMaxScaler())
+    X_train, X_val, X_test = normalize(X_train, X_val, X_test, features_to_standardize, StandardScaler())
     
     return X_train, Y_train, X_val, Y_val, X_test, Y_test
 
-def train_baseline_model(X_train, y_train):
+class BaselineModel:
     """
-    Train a baseline regression model using Lasso regression. Save the trained model.
-    """
-    model = Lasso(alpha=0.1)
-    model.fit(X_train, y_train)
-    
-    # Save the trained model
-    joblib.dump(model, "models/baseline_model.joblib")
-    
-    return model
-
-def get_baseline_model():
-    """
-    Regression
-    """
-    # Load the model if it exists
-    try:
-        model = joblib.load("models/baseline_model.joblib")
-        return model
-    except FileNotFoundError:
-        pass
-    X_train, y_train, X_val, y_val, X_test, y_test = prepare_data()
-    model = train_baseline_model(X_train, y_train)
-    return model
-
-def tree_model():
-    """
-    Tree
+    Baseline regression model using Lasso regression.
     """
 
-    pass
+    def __init__(self, alpha=0.1):
+        self.model = Lasso(alpha=alpha)
 
-def final_model():
-    """
-    Advanced ???
-    """
-
-
-    pass
+    def fit(self, X, y):
+        self.model.fit(X, y)
+        
+    def predict(self, X):
+        return self.model.predict(X)   
