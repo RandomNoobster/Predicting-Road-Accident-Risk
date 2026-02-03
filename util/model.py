@@ -1,8 +1,22 @@
 def baseline_model():
+    """
+    Regression
+    """
+
+
     pass
 
-def secondary_model():
+def tree_model():
+    """
+    Tree
+    """
+
     pass
 
 def final_model():
+    """
+    Advanced ???
+    """
+
+
     pass
