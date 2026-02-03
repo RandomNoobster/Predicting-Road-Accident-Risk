@@ -45,9 +45,7 @@ def summarize_columns(df):
             unique_values = df[col].unique()
             print(f"{col}: Categories: {list(unique_values)}")
     
-def normalize(train_df, val_df, test_df, columns):
-    scaler = MinMaxScaler()
-    
+def normalize(train_df, val_df, test_df, columns, scaler):    
     train_df[columns] = scaler.fit_transform(train_df[columns])
     val_df[columns] = scaler.transform(val_df[columns])
     test_df[columns] = scaler.transform(test_df[columns])
