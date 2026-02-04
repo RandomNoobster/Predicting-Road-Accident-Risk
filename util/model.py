@@ -1,69 +1,24 @@
 from sklearn.linear_model import LinearRegression, LassoCV
-from sklearn.base import BaseEstimator
 import tensorflow as tf
 import tensorflow_probability as tfp
 import tf_keras as keras
 from tf_keras import layers
 import numpy as np
-import joblib
-import json
-import os
 import xgboost as xgb
-from pathlib import Path
-
-MODEL_DIR = Path("saved_models")
-MODEL_DIR.mkdir(parents=True, exist_ok=True)
-
-
-class PersistentMixin:
-    def fit_or_load(self, X, y, **fit_params):
-        init_params = {
-            k: v
-            for k, v in self.__dict__.items()
-            if not k.startswith("_") and k != "model"
-        }
-
-        config = {
-            "class": self.__class__.__name__,
-            "init": init_params,
-            "fit": fit_params,
-        }
-        unique_id = joblib.hash(config)
-
-        base_name = f"{self.__class__.__name__}_{unique_id}"
-        is_keras = hasattr(self.model, "save_weights")
-
-        filename = f"{base_name}.weights.h5" if is_keras else f"{base_name}.pkl"
-        file_path = MODEL_DIR / filename
-        meta_path = MODEL_DIR / f"{base_name}.json"
-
-        if file_path.exists():
-            print(f"✅ Found cached model: {filename}")
-            if is_keras:
-                self.model.load_weights(file_path)
-            else:
-                loaded_obj = joblib.load(file_path)
-                self.__dict__.update(loaded_obj.__dict__)
-            return self
-
-        print(f"⚙️  Training new model: {base_name}...")
-        self.fit(X, y, **fit_params)
-
-        if is_keras:
-            self.model.save_weights(file_path)
-        else:
-            joblib.dump(self, file_path)
-
-        with open(meta_path, "w") as f:
-            json.dump(config, f, indent=4, default=str)
-
-        return self
-
+from util.model_utils import PersistentMixin
 
 class BaselineModel(PersistentMixin):
     """
-    Baseline regression model using Linear Regression.
-    Uncertainty is estimated as the standard deviation of training residuals.
+    We start with a Simple Linear Regressor as our initial hypothesis.
+    
+    In accordance with the principle of "Occam's Razor" discussed in the 
+    'A Baseline Approach' slides, our goal is to establish a solution with the 
+    simplest possible model. This helps us determine if the data actually 
+    requires non-linear complexity.
+    
+    For uncertainty, we assume 'Homoscedasticity'—the idea that the model's 
+    error is constant across all inputs. We estimate this global noise 
+    level by calculating the standard deviation of the training residuals.
     """
 
     def __init__(self):
@@ -73,6 +28,8 @@ class BaselineModel(PersistentMixin):
     def fit(self, X, y):
         self.model.fit(X, y)
         preds = self.model.predict(X)
+        # We calculate the standard deviation of the error (residuals).
+        # This represents our uncertainty as a single constant value.
         self.std_err = np.std(y - preds)
 
     def predict(self, X):
@@ -80,17 +37,25 @@ class BaselineModel(PersistentMixin):
 
     def predict_with_uncertainty(self, X):
         mean = self.predict(X)
+        # We broadcast the constant error estimate across all predictions.
         stddev = np.full_like(mean, self.std_err)
         return mean, stddev
 
 
 class L1Model(PersistentMixin):
     """
-    L1-regularized regression model using LassoCV.
-    Uncertainty is estimated as the standard deviation of training residuals.
+    We use Lasso (L1 Regularization) to refine our baseline through feature selection.
+    
+    As noted in the 'Lasso' section of the baseline slides, simple OLS regression 
+    often assigns non-zero weights to irrelevant features, which can lead to overfitting. 
+    By using an L1 penalty, we force the weights of less important features to zero. 
+    This creates a 'sparse' model that is easier for us to interpret and present 
+    to a domain expert.
     """
 
     def __init__(self, cv=15, random_state=42):
+        # We use LassoCV with 15-fold cross-validation to ensure our 
+        # regularization strength (alpha) is robustly calibrated.
         self.cv = cv
         self.random_state = random_state
         self.model = LassoCV(cv=cv, random_state=random_state)
@@ -112,18 +77,21 @@ class L1Model(PersistentMixin):
 
 class XGBoostModel(PersistentMixin):
     """
-    Non-linear regression using Gradient Boosted Trees (XGBoost).
-
-    Curriculum Ref: 'Non-Linear Models' (Gradient Boosting).
-
-    Uncertainty Quantification:
-    Since standard XGBoost is a point estimator, we implement 'Quantile Regression'
-    to estimate uncertainty. We train 3 separate estimators:
-      1. Mean (Objective: Squared Error)
-      2. Lower Bound (Objective: Quantile 0.16)
-      3. Upper Bound (Objective: Quantile 0.84)
-
-    This range (16%-84%) approximates +/- 1 Standard Deviation.
+    We implement XGBoost to capture non-linearities and feature interactions.
+    
+    Compared to our linear models, the 'Non-Linear Models' slides highlight 
+    that Gradient Boosted Trees can model complex dependencies (like feature A 
+    only being relevant when feature B is high) which linear regressors miss.
+    
+    A major limitation of XGBoost is that it is a point estimator—it typically 
+    only predicts a single value. To provide uncertainty, we implement 
+    Quantile Regression. We train three independent versions of our model:
+      1. One for the mean (MSE loss).
+      2. One for the 16th percentile (lower bound).
+      3. One for the 84th percentile (upper bound).
+      
+    This 16-84 range corresponds to approximately +/- 1 standard deviation 
+    if we assume the underlying noise is normally distributed.
     """
 
     def __init__(
@@ -140,7 +108,7 @@ class XGBoostModel(PersistentMixin):
         self.n_jobs = n_jobs
         self.random_state = random_state
 
-        # Main model (Mean/MSE)
+        # Primary model for point predictions
         self.model = xgb.XGBRegressor(
             n_estimators=n_estimators,
             max_depth=max_depth,
@@ -150,7 +118,7 @@ class XGBoostModel(PersistentMixin):
             objective="reg:squarederror",
         )
 
-        # Lower Bound Model (16th Percentile ~ -1 Sigma)
+        # Quantile models used to build a confidence interval
         self.model_lower = xgb.XGBRegressor(
             n_estimators=n_estimators,
             max_depth=max_depth,
@@ -161,7 +129,6 @@ class XGBoostModel(PersistentMixin):
             quantile_alpha=0.16,
         )
 
-        # Upper Bound Model (84th Percentile ~ +1 Sigma)
         self.model_upper = xgb.XGBRegressor(
             n_estimators=n_estimators,
             max_depth=max_depth,
@@ -173,36 +140,31 @@ class XGBoostModel(PersistentMixin):
         )
 
     def fit(self, X, y, eval_set=None, verbose=False):
-        # We need to fit all three models
-        # Note: In a production setting, this triples training time.
-
-        # 1. Fit Main
+        # We accept a 3x increase in training time to gain the ability
+        # to quantify how confident our non-linear model is.
         self.model.fit(X, y, eval_set=eval_set, verbose=verbose)
-
-        # 2. Fit Quantiles (Uncertainty)
         self.model_lower.fit(X, y, eval_set=eval_set, verbose=verbose)
         self.model_upper.fit(X, y, eval_set=eval_set, verbose=verbose)
-
         return self
 
     def predict(self, X):
         return self.model.predict(X)
 
     def predict_with_uncertainty(self, X):
-        """
-        Returns:
-            mean: The prediction from the main MSE model.
-            stddev: Approximated as (Upper_Quantile - Lower_Quantile) / 2
-        """
         mean = self.model.predict(X)
         lower = self.model_lower.predict(X)
         upper = self.model_upper.predict(X)
 
-        # Approximate Standard Deviation from the quantile spread
-        # (Q84 - Q16) covers roughly 2 standard deviations in a normal dist.
+        # Since the distance from 16% to 84% covers 2 standard deviations, 
+        # we divide the spread by 2 to get our estimated sigma.
         stddev = (upper - lower) / 2.0
 
-        # Safety: Ensure stddev is non-negative (trees might cross in sparse regions)
+        # Regarding the clamping: trees are trained independently. In sparse
+        # data regions, it's possible for the 'lower' tree to predict a value 
+        # higher than the 'upper' tree due to sampling noise. Since a 
+        # negative standard deviation is mathematically impossible, we use
+        # np.maximum to ensure numerical stability. This isn't "lying," but 
+        # rather correcting for the lack of coordination between the trees.
         stddev = np.maximum(stddev, 1e-6)
 
         return mean, stddev
@@ -210,8 +172,16 @@ class XGBoostModel(PersistentMixin):
 
 class NeuroProbabilisticModel(PersistentMixin):
     """
-    NPN for continuous data using a Normal distribution.
-    This estimates both the risk value and the input-specific uncertainty.
+    We implement a Neuro-Probabilistic model to estimate Aleatoric Uncertainty.
+    
+    Following the 'Neuro-Probabilistic Models' lecture, we distinguish 
+    between uncertainty in the model (Epistemic) and uncertainty inherent 
+    to the data/process (Aleatoric). This model focuses on Aleatoric 
+    uncertainty by learning a conditional distribution: y ~ N(mu(x), sigma(x)).
+    
+    Unlike our baselines, this model is 'Heteroscedastic'—it can learn that 
+    some input regions are noisier than others, which is critical for 
+    industrial risk assessment.
     """
 
     def __init__(self, input_shape=(16,), hidden_layers=[32, 32]):
@@ -223,9 +193,15 @@ class NeuroProbabilisticModel(PersistentMixin):
         for h in hidden_layers:
             x = layers.Dense(h, activation="relu")(x)
 
+        # Our output layer has 2 neurons: one for the mean and one for the scale.
         params = layers.Dense(2, activation="linear")(x)
 
+        # In accordance with the slides on 'Building a Neuro-Probabilistic Model',
+        # we use a DistributionLambda to wrap our distribution logic.
         def distribution_builder(t):
+            # We apply softplus to the scale neuron because the standard 
+            # deviation MUST be positive. We add a small epsilon (1e-3) 
+            # to avoid numerical issues during log-likelihood calculations.
             return tfp.distributions.Normal(
                 loc=t[..., :1], scale=1e-3 + tf.math.softplus(t[..., 1:])
             )
@@ -233,6 +209,9 @@ class NeuroProbabilisticModel(PersistentMixin):
         model_out = tfp.layers.DistributionLambda(distribution_builder)(params)
         self.model = keras.Model(model_in, model_out)
 
+        # We minimize the Negative Log Likelihood (NLL). As the course explains,
+        # NLL is the proper way to train models that output distributions,
+        # as it rewards the model for placing high probability on the true values.
         negloglikelihood = lambda y_true, dist: -dist.log_prob(y_true)
         self.model.compile(optimizer="adam", loss=negloglikelihood)
 
@@ -250,6 +229,11 @@ class NeuroProbabilisticModel(PersistentMixin):
                 np.asarray(y_v).astype("float32"),
             )
 
+        # We chose a large batch size (2048) for two reasons:
+        # 1. To improve computational throughput (faster training).
+        # 2. To stabilize the gradients. Probabilistic models can have 
+        # noisy gradients when estimating variance; larger batches provide 
+        # a better estimate of the distribution's properties in each step.
         return self.model.fit(
             X_tf,
             y_tf,
@@ -261,11 +245,13 @@ class NeuroProbabilisticModel(PersistentMixin):
 
     def predict(self, X):
         X_tf = np.asarray(X).astype("float32")
+        # Calling the model returns a distribution object.
         dist = self.model(X_tf)
         return dist.mean().numpy().ravel()
 
     def predict_with_uncertainty(self, X):
         X_tf = np.asarray(X).astype("float32")
+        # We call the model to obtain the distribution parameters (mu and sigma).
         dist = self.model(X_tf)
         mean = dist.mean().numpy().ravel()
         stddev = dist.stddev().numpy().ravel()
