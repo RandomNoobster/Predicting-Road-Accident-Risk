@@ -101,12 +101,22 @@ class XGBoostModel(PersistentMixin):
         learning_rate=0.05,
         n_jobs=-1,
         random_state=42,
+        objective=None,
     ):
         self.n_estimators = n_estimators
         self.max_depth = max_depth
         self.learning_rate = learning_rate
         self.n_jobs = n_jobs
         self.random_state = random_state
+        
+        if objective is not None:
+            self.mean_objective = objective.mean
+            self.lower_quantile_objective = objective.lower_quantile
+            self.upper_quantile_objective = objective.upper_quantile
+        else:
+            self.mean_objective = "reg:squarederror"
+            self.lower_quantile_objective = "reg:quantileerror"
+            self.upper_quantile_objective = "reg:quantileerror"
 
         # Primary model for point predictions
         self.model = xgb.XGBRegressor(
@@ -115,7 +125,7 @@ class XGBoostModel(PersistentMixin):
             learning_rate=learning_rate,
             n_jobs=n_jobs,
             random_state=random_state,
-            objective="reg:squarederror",
+            objective=self.mean_objective,
         )
 
         # Quantile models used to build a confidence interval
@@ -125,7 +135,7 @@ class XGBoostModel(PersistentMixin):
             learning_rate=learning_rate,
             n_jobs=n_jobs,
             random_state=random_state,
-            objective="reg:quantileerror",
+            objective=self.lower_quantile_objective,
             quantile_alpha=0.16,
         )
 
@@ -135,7 +145,7 @@ class XGBoostModel(PersistentMixin):
             learning_rate=learning_rate,
             n_jobs=n_jobs,
             random_state=random_state,
-            objective="reg:quantileerror",
+            objective=self.upper_quantile_objective,
             quantile_alpha=0.84,
         )
 
@@ -184,7 +194,7 @@ class NeuroProbabilisticModel(PersistentMixin):
     industrial risk assessment.
     """
 
-    def __init__(self, input_shape=(16,), hidden_layers=[32, 32]):
+    def __init__(self, input_shape=(16,), hidden_layers=[32, 32], custom_loss=None):
         self.input_shape = input_shape
         self.hidden_layers = hidden_layers
 
@@ -213,7 +223,10 @@ class NeuroProbabilisticModel(PersistentMixin):
         # NLL is the proper way to train models that output distributions,
         # as it rewards the model for placing high probability on the true values.
         negloglikelihood = lambda y_true, dist: -dist.log_prob(y_true)
-        self.model.compile(optimizer="adam", loss=negloglikelihood)
+        
+        # If a custom loss is provided, we use it instead of NLL.
+        loss_func = custom_loss.loss if custom_loss else negloglikelihood
+        self.model.compile(optimizer="adam", loss=loss_func)
 
     def fit(
         self, X, y, validation_data=None, epochs=50, batch_size=2048, verbose="auto"
