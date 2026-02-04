@@ -1,3 +1,4 @@
+from sklearn.ensemble import RandomForestRegressor
 from sklearn.linear_model import Lasso
 import joblib
 
@@ -29,14 +30,15 @@ def prepare_data():
 
 class BaselineModel:
     """
-    Baseline regression model using Lasso regression.
+    Baseline regression model using Random Forest.
     """
 
-    def __init__(self, alpha=0.1):
-        self.model = Lasso(alpha=alpha)
+    def __init__(self, n_estimators=10, random_state=42):
+        # Random Forest is robust and rarely results in "zero importance" for everything
+        self.model = RandomForestRegressor(n_estimators=n_estimators, random_state=random_state)
 
     def fit(self, X, y):
         self.model.fit(X, y)
         
     def predict(self, X):
-        return self.model.predict(X)   
+        return self.model.predict(X) 
