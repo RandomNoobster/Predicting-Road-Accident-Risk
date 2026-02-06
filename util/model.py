@@ -188,7 +188,7 @@ class NeuroProbabilisticModel(PersistentMixin):
     industrial risk assessment.
     """
 
-    def __init__(self, input_shape=(16,), hidden_layers=[32, 32], custom_loss=None):
+    def __init__(self, input_shape=(16,), hidden_layers=[32, 64, 32], custom_loss=None):
         self.input_shape = input_shape
         self.hidden_layers = hidden_layers
 
@@ -263,3 +263,14 @@ class NeuroProbabilisticModel(PersistentMixin):
         mean = dist.mean().numpy().ravel()
         stddev = dist.stddev().numpy().ravel()
         return mean, stddev
+    
+    # Used in SHAP
+    def predict_mean(self, X):
+        X_tf = np.asarray(X).astype("float32")
+        dist = self.model(X_tf)
+        return dist.mean().numpy().ravel()
+
+    def predict_std(self, X):
+        X_tf = np.asarray(X).astype("float32")
+        dist = self.model(X_tf)
+        return dist.stddev().numpy().ravel()
