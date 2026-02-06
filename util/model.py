@@ -7,18 +7,17 @@ import numpy as np
 import xgboost as xgb
 from util.model_utils import PersistentMixin
 
+
 class BaselineModel(PersistentMixin):
     """
     We start with a Simple Linear Regressor as our initial hypothesis.
-    
-    In accordance with the principle of "Occam's Razor" discussed in the 
-    'A Baseline Approach' slides, our goal is to establish a solution with the 
-    simplest possible model. This helps us determine if the data actually 
-    requires non-linear complexity.
-    
-    For uncertainty, we assume 'Homoscedasticity'—the idea that the model's 
-    error is constant across all inputs. We estimate this global noise 
-    level by calculating the standard deviation of the training residuals.
+
+    In accordance with the principle of "Occam's Razor" our goal is to establish a solution with the
+    simplest possible model. This helps us determine if the data actually requires non-linear complexity.
+
+    For uncertainty, we assume that the model's error is constant across
+    all inputs. We estimate this global noise level by calculating the standard
+    deviation of the training residuals.
     """
 
     def __init__(self):
@@ -37,7 +36,6 @@ class BaselineModel(PersistentMixin):
 
     def predict_with_uncertainty(self, X):
         mean = self.predict(X)
-        # We broadcast the constant error estimate across all predictions.
         stddev = np.full_like(mean, self.std_err)
         return mean, stddev
 
@@ -45,16 +43,15 @@ class BaselineModel(PersistentMixin):
 class L1Model(PersistentMixin):
     """
     We use Lasso (L1 Regularization) to refine our baseline through feature selection.
-    
-    As noted in the 'Lasso' section of the baseline slides, simple OLS regression 
-    often assigns non-zero weights to irrelevant features, which can lead to overfitting. 
-    By using an L1 penalty, we force the weights of less important features to zero. 
-    This creates a 'sparse' model that is easier for us to interpret and present 
+
+    Simple regression often assigns non-zero weights to irrelevant features, which can lead to overfitting.
+    By using an L1 penalty, we force the weights of less important features to zero.
+    This creates a 'sparse' model that is easier for us to interpret and present
     to a domain expert.
     """
 
     def __init__(self, cv=15, random_state=42):
-        # We use LassoCV with 15-fold cross-validation to ensure our 
+        # We use LassoCV with 15-fold cross-validation to ensure our
         # regularization strength (alpha) is robustly calibrated.
         self.cv = cv
         self.random_state = random_state
@@ -78,19 +75,19 @@ class L1Model(PersistentMixin):
 class XGBoostModel(PersistentMixin):
     """
     We implement XGBoost to capture non-linearities and feature interactions.
-    
-    Compared to our linear models, the 'Non-Linear Models' slides highlight 
-    that Gradient Boosted Trees can model complex dependencies (like feature A 
+
+    Compared to our linear models, the 'Non-Linear Models' slides highlight
+    that Gradient Boosted Trees can model complex dependencies (like feature A
     only being relevant when feature B is high) which linear regressors miss.
-    
-    A major limitation of XGBoost is that it is a point estimator—it typically 
-    only predicts a single value. To provide uncertainty, we implement 
+
+    A major limitation of XGBoost is that it is a point estimator—it typically
+    only predicts a single value. To provide uncertainty, we implement
     Quantile Regression. We train three independent versions of our model:
       1. One for the mean (MSE loss).
       2. One for the 16th percentile (lower bound).
       3. One for the 84th percentile (upper bound).
-      
-    This 16-84 range corresponds to approximately +/- 1 standard deviation 
+
+    This 16-84 range corresponds to approximately +/- 1 standard deviation
     if we assume the underlying noise is normally distributed.
     """
 
@@ -108,7 +105,7 @@ class XGBoostModel(PersistentMixin):
         self.learning_rate = learning_rate
         self.n_jobs = n_jobs
         self.random_state = random_state
-        
+
         if objective is not None:
             self.mean_objective = objective.mean
             self.lower_quantile_objective = objective.lower_quantile
@@ -165,16 +162,14 @@ class XGBoostModel(PersistentMixin):
         lower = self.model_lower.predict(X)
         upper = self.model_upper.predict(X)
 
-        # Since the distance from 16% to 84% covers 2 standard deviations, 
+        # Since the distance from 16% to 84% covers 2 standard deviations,
         # we divide the spread by 2 to get our estimated sigma.
         stddev = (upper - lower) / 2.0
 
-        # Regarding the clamping: trees are trained independently. In sparse
-        # data regions, it's possible for the 'lower' tree to predict a value 
-        # higher than the 'upper' tree due to sampling noise. Since a 
+        # In sparse data regions, it's possible for the 'lower' tree to predict a value
+        # higher than the 'upper' tree due to sampling noise. Since a
         # negative standard deviation is mathematically impossible, we use
-        # np.maximum to ensure numerical stability. This isn't "lying," but 
-        # rather correcting for the lack of coordination between the trees.
+        # np.maximum to ensure numerical stability.
         stddev = np.maximum(stddev, 1e-6)
 
         return mean, stddev
@@ -183,14 +178,13 @@ class XGBoostModel(PersistentMixin):
 class NeuroProbabilisticModel(PersistentMixin):
     """
     We implement a Neuro-Probabilistic model to estimate Aleatoric Uncertainty.
-    
-    Following the 'Neuro-Probabilistic Models' lecture, we distinguish 
-    between uncertainty in the model (Epistemic) and uncertainty inherent 
-    to the data/process (Aleatoric). This model focuses on Aleatoric 
+
+    We distinguish between uncertainty in the model (Epistemic) and uncertainty inherent
+    to the data/process (Aleatoric). This model focuses on Aleatoric
     uncertainty by learning a conditional distribution: y ~ N(mu(x), sigma(x)).
-    
-    Unlike our baselines, this model is 'Heteroscedastic'—it can learn that 
-    some input regions are noisier than others, which is critical for 
+
+    Unlike our baselines, this model can learn that
+    some input regions are noisier than others, which is critical for
     industrial risk assessment.
     """
 
@@ -209,8 +203,8 @@ class NeuroProbabilisticModel(PersistentMixin):
         # In accordance with the slides on 'Building a Neuro-Probabilistic Model',
         # we use a DistributionLambda to wrap our distribution logic.
         def distribution_builder(t):
-            # We apply softplus to the scale neuron because the standard 
-            # deviation MUST be positive. We add a small epsilon (1e-3) 
+            # We apply softplus to the scale neuron because the standard
+            # deviation MUST be positive. We add a small epsilon (1e-3)
             # to avoid numerical issues during log-likelihood calculations.
             return tfp.distributions.Normal(
                 loc=t[..., :1], scale=1e-3 + tf.math.softplus(t[..., 1:])
@@ -223,7 +217,7 @@ class NeuroProbabilisticModel(PersistentMixin):
         # NLL is the proper way to train models that output distributions,
         # as it rewards the model for placing high probability on the true values.
         negloglikelihood = lambda y_true, dist: -dist.log_prob(y_true)
-        
+
         # If a custom loss is provided, we use it instead of NLL.
         loss_func = custom_loss.loss if custom_loss else negloglikelihood
         self.model.compile(optimizer="adam", loss=loss_func)
@@ -244,8 +238,8 @@ class NeuroProbabilisticModel(PersistentMixin):
 
         # We chose a large batch size (2048) for two reasons:
         # 1. To improve computational throughput (faster training).
-        # 2. To stabilize the gradients. Probabilistic models can have 
-        # noisy gradients when estimating variance; larger batches provide 
+        # 2. To stabilize the gradients. Probabilistic models can have
+        # noisy gradients when estimating variance; larger batches provide
         # a better estimate of the distribution's properties in each step.
         return self.model.fit(
             X_tf,
