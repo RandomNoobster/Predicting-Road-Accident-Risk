@@ -93,7 +93,7 @@ class XGBoostModel(PersistentMixin):
 
     def __init__(
         self,
-        n_estimators=500,
+        n_estimators=100,
         max_depth=5,
         learning_rate=0.05,
         n_jobs=-1,
@@ -220,7 +220,7 @@ class NeuroProbabilisticModel(PersistentMixin):
 
         # If a custom loss is provided, we use it instead of NLL.
         loss_func = custom_loss.loss if custom_loss else negloglikelihood
-        self.model.compile(optimizer="adam", loss=loss_func)
+        self.model.compile(optimizer=keras.optimizers.Adam(learning_rate=1e-5), loss=loss_func)
 
     def fit(
         self, X, y, validation_data=None, epochs=50, batch_size=2048, verbose="auto"
