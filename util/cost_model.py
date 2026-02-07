@@ -13,14 +13,14 @@ class CustomLoss():
         weighted_mae = np.mean(np.abs(diff) * weights)
         return weighted_mae
 
-# Custom loss for XGBoost objective
+# Custom loss for XGBoost objective (we need both first and second derivative)
 class CustomXGBoostLoss:
     def __init__(self, penalty_underestimate):
         self.penalty_underestimate = penalty_underestimate
 
-    def objective(self, y_pred, y_true):
-        errors = y_pred - y_true
-        grad = np.where(errors < 0, -self.penalty_underestimate, 1.0)
+    def objective(self, y_true, y_pred):
+        diff = y_pred - y_true
+        grad = np.where(diff < 0, -self.penalty_underestimate, 1.0)
         hess = np.ones_like(y_pred)
         return grad, hess
 
@@ -31,21 +31,17 @@ class CustomNeuroLoss:
         self.penalty_underestimate = float(penalty_underestimate)
 
     def loss(self, y_true, dist):
+        # Code looks ugly because there were some type-differences
         mean = dist.mean()
-
         y_true = tf.cast(y_true, mean.dtype)
-
         diff = mean - y_true
 
         penalty = tf.cast(self.penalty_underestimate, mean.dtype)
         one = tf.cast(1.0, mean.dtype)
-
+        
         weights = tf.where(diff < 0.0, penalty, one)
-
         nll = -dist.log_prob(y_true)
-
         weighted_nll = nll * weights
-
         return tf.reduce_mean(weighted_nll)
     
 
