@@ -79,16 +79,6 @@ class XGBoostModel(PersistentMixin):
     Compared to our linear models, the 'Non-Linear Models' slides highlight
     that Gradient Boosted Trees can model complex dependencies (like feature A
     only being relevant when feature B is high) which linear regressors miss.
-
-    A major limitation of XGBoost is that it is a point estimator—it typically
-    only predicts a single value. To provide uncertainty, we implement
-    Quantile Regression. We train three independent versions of our model:
-      1. One for the mean (MSE loss).
-      2. One for the 16th percentile (lower bound).
-      3. One for the 84th percentile (upper bound).
-
-    This 16-84 range corresponds to approximately +/- 1 standard deviation
-    if we assume the underlying noise is normally distributed.
     """
 
     def __init__(
@@ -107,51 +97,21 @@ class XGBoostModel(PersistentMixin):
         self.random_state = random_state
 
         if objective is not None:
-            self.mean_objective = objective.mean
-            self.lower_quantile_objective = objective.lower_quantile
-            self.upper_quantile_objective = objective.upper_quantile
+            self.objective = objective.objective
         else:
-            self.mean_objective = "reg:squarederror"
-            self.lower_quantile_objective = "reg:quantileerror"
-            self.upper_quantile_objective = "reg:quantileerror"
+            self.objective = "reg:squarederror"
 
-        # Primary model for point predictions
         self.model = xgb.XGBRegressor(
             n_estimators=n_estimators,
             max_depth=max_depth,
             learning_rate=learning_rate,
             n_jobs=n_jobs,
             random_state=random_state,
-            objective=self.mean_objective,
-        )
-
-        # Quantile models used to build a confidence interval
-        self.model_lower = xgb.XGBRegressor(
-            n_estimators=n_estimators,
-            max_depth=max_depth,
-            learning_rate=learning_rate,
-            n_jobs=n_jobs,
-            random_state=random_state,
-            objective=self.lower_quantile_objective,
-            quantile_alpha=0.16,
-        )
-
-        self.model_upper = xgb.XGBRegressor(
-            n_estimators=n_estimators,
-            max_depth=max_depth,
-            learning_rate=learning_rate,
-            n_jobs=n_jobs,
-            random_state=random_state,
-            objective=self.upper_quantile_objective,
-            quantile_alpha=0.84,
+            objective=self.objective,
         )
 
     def fit(self, X, y, eval_set=None, verbose=False):
-        # We accept a 3x increase in training time to gain the ability
-        # to quantify how confident our non-linear model is.
         self.model.fit(X, y, eval_set=eval_set, verbose=verbose)
-        self.model_lower.fit(X, y, eval_set=eval_set, verbose=verbose)
-        self.model_upper.fit(X, y, eval_set=eval_set, verbose=verbose)
         return self
 
     def predict(self, X):
@@ -159,20 +119,8 @@ class XGBoostModel(PersistentMixin):
 
     def predict_with_uncertainty(self, X):
         mean = self.model.predict(X)
-        lower = self.model_lower.predict(X)
-        upper = self.model_upper.predict(X)
 
-        # Since the distance from 16% to 84% covers 2 standard deviations,
-        # we divide the spread by 2 to get our estimated sigma.
-        stddev = (upper - lower) / 2.0
-
-        # In sparse data regions, it's possible for the 'lower' tree to predict a value
-        # higher than the 'upper' tree due to sampling noise. Since a
-        # negative standard deviation is mathematically impossible, we use
-        # np.maximum to ensure numerical stability.
-        stddev = np.maximum(stddev, 1e-6)
-
-        return mean, stddev
+        return mean
 
 
 class NeuroProbabilisticModel(PersistentMixin):

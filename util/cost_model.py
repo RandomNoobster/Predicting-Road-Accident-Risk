@@ -10,10 +10,19 @@ class CustomLoss():
     def loss(self, y_true, y_pred):
         diff = y_pred - y_true
         weights = np.where(diff < 0, self.penalty_underestimate, 1.0)
-        
         weighted_mae = np.mean(np.abs(diff) * weights)
         return weighted_mae
-    
+
+# Custom loss for XGBoost objective
+class CustomXGBoostLoss:
+    def __init__(self, penalty_underestimate):
+        self.penalty_underestimate = penalty_underestimate
+
+    def objective(self, y_pred, y_true):
+        errors = y_pred - y_true
+        grad = np.where(errors < 0, -self.penalty_underestimate, 1.0)
+        hess = np.ones_like(y_pred)
+        return grad, hess
 
 # For Neuro Probabilistic Models the loss has to be calculated
 # a bit differently as they output a distribution instead of one value
