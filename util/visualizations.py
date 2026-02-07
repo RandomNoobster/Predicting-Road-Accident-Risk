@@ -57,3 +57,31 @@ def plot_all_features(X, y):
 
     plt.tight_layout()
     plt.show()
+
+
+def plot_learning_curves_neuro(history):
+    plt.figure(figsize=(10, 6))
+    
+    plt.plot(history.history['loss'], label='Train')
+    plt.plot(history.history['val_loss'], label='Val')
+    
+    plt.title('Training')
+    plt.xlabel('Epochs')
+    plt.ylabel('Loss')
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    plt.show()
+
+
+def plot_learning_curves_xgboost(results):
+    metric = list(results['validation_0'].keys())[0]
+    
+    plt.plot(results['validation_0'][metric], label='Train')
+    plt.plot(results['validation_1'][metric], label='Val')
+    
+    plt.title('Training')
+    plt.xlabel('Epochs')
+    plt.ylabel('Loss')
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    plt.show()
