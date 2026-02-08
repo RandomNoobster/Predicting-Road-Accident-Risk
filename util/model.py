@@ -83,18 +83,20 @@ class XGBoostModel(PersistentMixin):
 
     def __init__(
         self,
-        n_estimators=100,
-        max_depth=5,
-        learning_rate=0.05,
+        n_estimators=500,
+        max_depth=9,
+        learning_rate=0.01,
         n_jobs=-1,
         random_state=42,
         objective=None,
+        early_stopping_rounds=50
     ):
         self.n_estimators = n_estimators
         self.max_depth = max_depth
         self.learning_rate = learning_rate
         self.n_jobs = n_jobs
         self.random_state = random_state
+        self.early_stopping_rounds = early_stopping_rounds
 
         if objective is not None:
             self.objective = objective.objective
@@ -108,6 +110,7 @@ class XGBoostModel(PersistentMixin):
             n_jobs=n_jobs,
             random_state=random_state,
             objective=self.objective,
+            early_stopping_rounds=self.early_stopping_rounds
         )
 
     def fit(self, X, y, eval_set=None, verbose=False):
