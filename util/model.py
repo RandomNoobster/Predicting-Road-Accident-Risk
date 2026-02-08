@@ -139,7 +139,7 @@ class NeuroProbabilisticModel(PersistentMixin):
     industrial risk assessment.
     """
 
-    def __init__(self, input_shape=(16,), hidden_layers=[32, 64, 32], custom_loss=None):
+    def __init__(self, input_shape=(16,), hidden_layers=[32, 64, 64, 64, 64, 32], custom_loss=None):
         self.input_shape = input_shape
         self.hidden_layers = hidden_layers
 
@@ -170,11 +170,12 @@ class NeuroProbabilisticModel(PersistentMixin):
         negloglikelihood = lambda y_true, dist: -dist.log_prob(y_true)
 
         # If a custom loss is provided, we use it instead of NLL.
-        loss_func = custom_loss.loss if custom_loss else negloglikelihood
+        loss_func = custom_loss.loss if custom_loss else negloglikelihood 
+
         self.model.compile(optimizer=keras.optimizers.Adam(learning_rate=1e-5), loss=loss_func)
 
     def fit(
-        self, X, y, validation_data=None, epochs=50, batch_size=2048, verbose="auto"
+        self, X, y, validation_data=None, epochs=200, batch_size=2048, verbose="auto"
     ):
         X_tf = np.asarray(X).astype("float32")
         y_tf = np.asarray(y).astype("float32")
